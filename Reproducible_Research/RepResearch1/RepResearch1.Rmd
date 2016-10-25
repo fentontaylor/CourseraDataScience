@@ -1,0 +1,27 @@
+---
+title: "RepResearch1"
+author: "Fenton Taylor"
+date: "July 26, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This first section of code checks to see if the data files exist. If not, the 
+files will be downloaded and unzipped. Finally, it loads the data into the object
+'
+
+```{r}
+setwd("C:/Users/sec/Desktop/Coursera/projects/RepResearch1")
+if(!file.exists("activity.csv")){
+      if(!file.exists("repdata_data_activity.zip")){
+            fileURL <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+            download.file(fileURL, destfile = "repdata_data_activity.zip")
+      }
+      unzip("repdata_data_activity.zip")
+}
+act <- read.csv("activity.csv")
+summary(act)
+```

@@ -1,0 +1,172 @@
+---
+title: "Effect of Transmission Type on Automobile Efficiency (MPG)"
+author: "Fenton Taylor"
+date: "September 8, 2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+options(digits = 3)
+```
+
+#Executive Summary
+Using the car data collected by *Motor Trend*, we will determine two things:
+
+* Are manual or automatic transmissions better for mpg?
+* What is the mpg difference, if any, for transmission types?
+
+First, we will calculate the average mpg for each transmission type to see if there is a potential difference. Then we will fit a basic logistic regression to see if mpg alone is a good predictor of transmission type. If it isn't we will fit other models to determine the best set of predictors. Finally we will quantify the difference between average MPG for each transmission type and determine if that difference is significant.
+
+After analysis, it was determined that manual transmissions have a higher mpg than automatic when all other variables are held constant. Interstingly, the MPG ratings converge as car weight increases and acceleration decreases. Specifically, lighter/faster manual cars get about 2.8 better mpg, average manual cars get about 1.5 better mpg, and heavier/slower manual cars get about 1.0 better mpg than automatic cars.
+
+#The Data
+```{r load.libraries, include=FALSE}
+library(ggplot2)
+library(dplyr)
+library(knitr)
+data(mtcars)
+```
+
+The **mtcars** data set contains `r dim(mtcars)[2]` observations about `r dim(mtcars)[1]` different cars. The variables are: `r names(mtcars)`. (Full variable documentation [**HERE**](https://stat.ethz.ch/R-manual/R-devel/library/datasets/html/mtcars.html)).
+
+The column **mpg** contains numeric measurements of miles/(US) gallon. The column **am** contains binary values of transmission type (0 = automatic, 1 = manual). However, all the variables are numeric in the data set, so **am** should be converted to a factor along with other appropriate variables.
+
+```{r mpg.mean.table, echo=TRUE}
+model <- row.names(mtcars)
+mtcars <- mutate(mtcars,
+                 am = factor(am, labels = c("Automatic", "Manual")),
+                 cyl = factor(cyl),
+                 vs = factor(vs),
+                 gear = factor(gear),
+                 carb = factor(carb)
+                 )
+row.names(mtcars) <- model
+```
+
+#Exploratory Analysis
+Now that the data are in the correct form, let's take a look at the mean mpg for each transmission type and see if they are significantly different by using R's *t.test* function.
+
+```{r t.test}
+t <- t.test(mpg ~ am, data = mtcars)
+t$estimate
+p <- t$p.value
+names(p) <- "p-value"
+p
+```
+With a difference in the means of `r t$estimate[[2]]-t$estimate[[1]]` and a p-value of `r t$p.value` < .05 we can reject the null hypothesis that the means for the two groups are the same. However, let's first take a look at how **mpg** might be correlated with the other variables. (See *Figure 1* in the Appendix).
+
+- **mpg** is positively correlated with **drat**, **qsec**, **vs**, **am**, and **gear**.
+- **mpg** is negatively correlated with **cyl**, **disp**, **hp**, **wt**, and **carb**.
+
+Next, we will need to look at some regression models to see which of these variables, or combination of them, are the best predictors of **mpg** and to quantify the difference.
+
+#Regression Analysis
+First, we will fit a basic linear model with just **am** as the predictor for **mpg**.
+```{r base.model}
+basic <- lm(mpg ~ am, data = mtcars)
+basic.sum <- summary(basic)
+basic.sum$call; basic.sum$coefficients; 
+ar <- basic.sum$adj.r.squared
+names(ar) <- "Adjusted R^2"
+ar
+```
+
+Even though the transmission type is a significant predictor of **mpg** (p-value = .000285 < .05), the adjusted $R^2$ is only `r basic.sum$adj.r.squared`, meaning only about `r round(basic.sum$adj.r.squared,3)*100`% of the variability in the data is explained by the model. Surely, we can find a better model to predict **mpg**.
+
+###Finding the Best Model
+We will use R's *step* function to determine the best model to predict **mpg**. First, we must generate a model that includes all variables as predictors and let *step* test all possible combinations. The result is the following:
+
+```{r best.model}
+all <- lm(mpg ~ . -1, data = mtcars) # remove intercept for predictor comparison
+best <- step(all, trace = 0)
+best <- update(best, .~.+1) # add the intercept back for interpretability
+best.sum <- summary(best)
+best.sum$call; best.sum$coefficients; 
+ar2 <- best.sum$adj.r.squared
+names(ar2) = "Adjusted R^2"
+ar2
+```
+
+The best-fitting model according to the step function uses **am** (transmission type), **wt** (weight in 1000s of lbs), and **qsec** (quarter mile time in seconds--a measure of acceleration). Since we are really interested in transmisison type, let's fit one more model with an interaction between **am:wt** and **am:qsec**.
+
+```{r best.interaction}
+int <- lm(mpg ~ am:wt + am:qsec, data = mtcars)
+int.sum <- summary(int)
+int.sum$call; int.sum$coefficients; 
+ar3 <- int.sum$adj.r.squared
+names(ar3) = "Adjusted R^2"
+ar3
+```
+This model with variable interaction seems to be a solid fit. All of the coefficients are significant with p-values < .01, except for the intercept, which is still significant at `r int.sum$coef[1,4]`. Furthermore, this model has an adjusted $R^2$ term of `r ar3`, which is greater than the adjusted $R^2$ (`r ar2`) from the model produced by the *step* function. As a final check, we will use R's *anova* function to see if the interaction model is an improvement over the previous ones. 
+
+```{r anova}
+a <- anova(basic,best,int)
+p <- a$`Pr(>F)`[3]
+a
+```
+
+With a p-value of `r p` < .05, we can say with 95% confidence that the interaction model is an improvement over the best model returned by the *step* function. Therefore we will choose the interaction model.
+
+#Residual Diagnostics
+According to the residual diagnostic plots (see *Figure 2* in Appendix), we can verify the following assumptions.
+
+1. The *Residuals vs Fitted* plot shows random distribution and no non-linear trends, therefore the independence assumption is satisfied.
+2. The *Normal Q-Q* plot is approximately linear, therefore the residuals are approximately normally distributed.
+3. The *Scale Location* plot shows random distribution, which confirms constant variance.
+4. The *Residuals vs Leverage* confirms that there are no outliers.
+
+# Conclusion
+###Interpreting the Coefficients
+The interaction model has different coefficients for **am:wt** and **am:qsec**. That means automatic and manual transmissions will have different predicted values if **wt** and **qsec** are held constant. The expected value for mpg can be predicted by the following equation, where $am_{0i}$ = 1 or 0, if the transmission is Automatic or Manual, respectively, and $am_{1i}$ = 1 or 0, if the transmission is Manual or Automatic.  
+$$
+E[MPG_i] = 13.969 - 3.176(wt_i)(am_{0i}) - 6.099(wt_i)(am_{1i}) + 0.834(qsec_i)(am_{0i}) + 1.446(qsec_i)(am_{1i})
+$$
+So, if all other variables are held constant, the difference in expected mpg is 
+$$
+E[MPG_i|am_{1i}=1] - E[MPG_i|am_{0i}=1] = -2.93wt_i + 0.612qsec_i
+$$
+That means for every 1,000 lb increase in car weight, the expected difference in mpg decreases by 2.93 mpg. And for every 1 sec increase in quarter mile time, the expected difference in mpg increases by 0.612 mpg.
+
+###Results
+The following table shows the differences in expected mpg for three cars in range of weight and quarter mile times. The **wt** and **qsec** parameters were taken from the 1st quartile, mean, and 3rd quartile of those variables in the original data set.
+```{r conclusion}
+p <- data.frame(am = factor(rep(c("Automatic","Manual"),3)),
+                wt = rep(summary(mtcars$wt)[c(2,4,5)],each=2),
+                qsec = rep(summary(mtcars$qsec)[c(2,4,5)],each=2))
+p2 <- split(p, seq(nrow(p)))
+predictions <- lapply(p2, function(x) {predict(int, newdata=x)})
+predictions <- as.data.frame(t(matrix(unlist(predictions), nrow = 2)))
+predictions$Difference <- predictions$V2 - predictions$V1
+names(predictions)[1:2] <- c("Automatic MPG", "Manual MPG")
+row.names(predictions) <- c("1st Qu. (wt = 2.581, qsec = 16.89)",
+                            "Mean    (wt = 3.217, qsec = 17.85)",
+                            "3rd Qu. (wt = 3.610, qsec = 18.90)")
+kable(predictions, digits=2, caption = "Predicted values for MPG by transmission type.")
+```
+
+After analysis, it was determined that manual transmissions have a higher mpg than automatic when all other variables are held constant. Interstingly, the MPG ratings converge as car weight increases and acceleration decreases. Specifically, lighter/faster manual cars get about `r predictions[1,3]` better mpg, average manual cars get about `r predictions[2,3]` better mpg, and heavier/slower manual cars get about `r predictions[3,3]` better mpg.
+
+***
+\newpage
+#Appendix
+###Figure 1 - Exploratory Analysis
+```{r figure1, fig.width=7, fig.height=3.5,fig.align="center"}
+# Figure 1
+par(mfrow = c(2,5), mar = c(4,2,1,1), oma = c(0,0,2,0))
+for(i in 1:10){
+      y <- mtcars$mpg
+      x <- mtcars[,i+1]
+      plot(x, y, xlab = names(mtcars)[i+1], ylab="")
+      if(is.numeric(x)) {abline(lm(y ~ x), col="red")}
+}
+mtext("Correlation of MPG to All Other Variables", outer = T, cex = 1.5)
+```
+
+###Figure 2 - Residual Diagnostics
+
+```{r figure 2, fig.width = 5, fig.height=4,fig.align="center"}
+# Figure 2
+par(mfrow=c(2,2), mar = c(2,2,2,1), oma = c(0,0,2,1))
+plot(int)
+```

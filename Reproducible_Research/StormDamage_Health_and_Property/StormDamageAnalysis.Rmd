@@ -1,0 +1,237 @@
+---
+title: "United States Storm Damage Analysis: Effects on Human Health and Economic Loss"
+author: "Fenton Taylor"
+date: "July 30, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:/Users/sec/Desktop/Coursera/projects/StormDamage_Health_and_Property")
+options(scipen = 1, digits = 2)
+library(plyr)
+library(ggplot2)
+library(reshape2)
+library(grid)
+```
+
+## Synopsis
+
+This analysis, which uses storm data collected by the National Weather Service, determined the leading weather-related causes of human death and injury, property damage, and crop damage. The purpose of identifying the most significant causes of weather-related destruction is to be able to prioritize resources and prepare for future weather events with the intent to mitigate losses. In the years 2006 to 2011 in the United States, tornadoes were the most hazardous to humans, followed by excessive heat, thunderstorm wind, lightning, and floods. Floods were by far the most destructive event to property, followed by tornadoes, hail, storm surges, and thuderstorm wind. Floods were also the leading cause of weather-related crop damage, followed by drought, hail, frost, and excessive heat. Hopefully with this information, steps can be taken to reduce the negative impact of future events.
+
+## Data Processing
+      
+This [Storm Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2) was collected by the National Weather Service. It contains information relating to weather events beginning in the year 1950, up to 2011. The [Documentation](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf) for the database contains detailed descriptions of the various weather event calssifications and how measurements are obtained. This report only uses data from the most recent 5 years, starting on 1/1/2006. The recent data is more relevant because it contains observations relating to current buildings, infrastructure, and weather patterns, which will show the most destructive weather events that need to be addressed. Further information can be found at the National Climatic Data Center Storm Events [FAQ.](https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf)
+
+First, the data needs to be downloaded and read into R.
+```{r readData, cache=TRUE}
+if(!file.exists("StormData.csv")){
+      url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+      download.file(url = url, destfile = "StormData.csv.bz2")
+      library(R.utils)
+      bunzip2("StormData.csv.bz2", "StormData.csv", remove = FALSE, skip = TRUE)
+}
+StormData <- read.csv("StormData.csv")
+```
+
+###Subsetting for Recent Data and Combining Weather Event Types
+
+Next, this analysis subsets the original dataframe, taking only observations from 1/1/2006 onward. Then, for this analysis, certain weather events that are similar in nature were combined to give a more succint summary of the data. For example, obvious duplicates such as "TSTM WIND" and "THUNDERSTORM WIND" should be combined, as they are clearly the same. Even the documentation makes no distinction between them. Similarly, "HEAT" and "EXCESSIVE HEAT" are similar enough to be combined. However, "THUNDERSTORM WIND" and "HIGH WIND" events were not combined since they have different causes. The documentation clearly states that reasoning, so this analysis treats the events separately. The same logic applies to keeping marine and land wind events separate, as well as "FLOOD" and "COASTAL FLOOD."
+
+The entire pipeline of event combinations was checked before and after each command to ensure that no event types were corrupted.
+      
+```{r dataProcessing_combine_names}
+names(StormData) <- tolower(names(StormData))
+first <- which(StormData$bgn_date=="1/1/2006 0:00:00")[1]
+sdr <- StormData[first:nrow(StormData),]
+sdr$evtype <- as.character(sdr$evtype)
+
+# Unify all variants of 'MARINE THUNDERSTORM WIND'
+sdr$evtype[grep("(MARINE TSTM|MARINE THUNDERSTORM) WIND",sdr$evtype)] <- "MARINE TSTORM WIND"
+# Unify all variants of 'THUNDERSTORM WIND'
+sdr$evtype[grep("(TSTM|THUNDERSTORM) WIND",sdr$evtype)] <- "TSTORM WIND"
+# Unify all variants of 'NON TSTORM MARINE WIND'
+sdr$evtype[grep("(MARINE HIGH|MARINE STRONG)",sdr$evtype)] <- "MARINE HIGH/STRONG WIND"
+# Unify all variants of 'NON TSTORM WIND'
+sdr$evtype[grep("(^HIGH WIND|^STRONG WIND)",sdr$evtype)] <- "HIGH/STRONG WIND"
+# Unify all variants of 'EXCESSIVE HEAT'
+sdr$evtype[grep("HEAT",sdr$evtype)] <- "EXCESSIVE HEAT"
+# Unify all variants of 'COLD'
+sdr$evtype[grep("COLD",sdr$evtype)] <- "EXTREME COLD"
+# Unify all variants of 'WINTER WEATHER'
+sdr$evtype[grep("WINTER|BLIZZARD|ICE STORM",sdr$evtype)] <- "WINTER WEATHER/STORM"
+# Unify all variants of 'FLOOD', excluding 'COASTAL FLOOD'
+sdr$evtype[grep("^FLOOD|^FLASH FLOOD",sdr$evtype)] <- "FLOOD/FLASH FLOOD"
+```
+
+###Subsetting For Health Data
+Next, we take a subset of the recent and combined-event dataframe. We only need the columns "evtype," "fatalities," and "injuries" to see which weather events pose the greatest risk to human health. The sum of fatalities and injuries are is calculated for each event type, and the sum of those is stored in a new column of the dataframe called "casualties." Finally, the dataframe is sorted by total casualties. 
+
+```{r dataProcessing_health}
+sdh <- sdr[, c("evtype","fatalities", "injuries")]
+sdh <- ddply(sdh, .(evtype), function(x) colSums(x[c(2:3)]))
+sdh$casualties <- sdh$fatalities + sdh$injuries
+sdh <- subset(sdh, sdh$casualties != 0)
+sdh <- mutate(sdh, evtype = as.factor(evtype))
+sdh <- arrange(sdh, desc(casualties))
+```
+
+###Subsetting For Economic Data
+Similarly, to determine the most destructive weather events to property and crops, a subset of the recent storm data for the columns relating to those measurements. In the original data, the damage values are recorded as a number and a letter, with the letters K = 1,000, M = 1,000,000 and B = 1,000,000,000. In order to make useful comparisons, those letters need to be transformed into the corresponding numbers and multiplied to their respective values. For example, 25 K becomes 25,000.
+
+Several more weather event types need be combined here that were not apparent in the health subset due to lack of casualties from one or more of the weather events. However, they are similar enough in nature to combine for analysis here.
+
+```{r dataProcessing_econ}
+# Subset columns for weather event type, and property and crop damage
+sde <- sdr[, c(8, 25:28)]
+#Remove observations where no damage was recorded
+nodmg <- which(sde$propdmg == 0 & sde$cropdmg == 0)
+sde <- sde[-nodmg,]
+sde <- mutate(sde, propdmgexp = as.character(propdmgexp), cropdmgexp = as.character(cropdmgexp))
+
+sde$propdmgexp[which(sde$propdmgexp=="")] <- 1
+sde$propdmgexp[which(sde$propdmgexp=="K")] <- 1000
+sde$propdmgexp[which(sde$propdmgexp=="M")] <- 1000000
+sde$propdmgexp[which(sde$propdmgexp=="B")] <- 1000000000
+sde$cropdmgexp[which(sde$cropdmgexp=="")] <- 1
+sde$cropdmgexp[which(sde$cropdmgexp=="K")] <- 1000
+sde$cropdmgexp[which(sde$cropdmgexp=="M")] <- 1000000
+sde$cropdmgexp[which(sde$cropdmgexp=="B")] <- 1000000000
+
+sde$propdmg <- sde$propdmg*as.numeric(sde$propdmgexp)
+sde$cropdmg <- sde$cropdmg*as.numeric(sde$cropdmgexp)
+
+# Unify all variants of 'STORM SURGE'
+sde$evtype[grep("STORM SURGE|COASTAL FLOOD",sde$evtype)] <- "STORM SURGE/COASTAL FLOOD"
+# Unify all variants of 'TROPICAL STORMS'
+sde$evtype[grep("HURRICANE|TROPICAL",sde$evtype)] <- "HURRICANE/TROPICAL STORM"
+
+sde <- sde[,c("evtype", "propdmg", "cropdmg")]
+sde <- ddply(sde, .(evtype), function(x) colSums(x[c(2:3)]))
+sde <- mutate(sde, evtype = as.factor(evtype))
+```
+
+## Results
+
+This section will give graphical representations of the most destructive weather events with respect to human health and damage to property and agriculture. First, we will take a look at the number of injuries and fatalities caused in the last 5 years by various weather events. Then we will determine which types of weather cause the most financial damage. In both cases the plot is "zoomed in" to better show the variation in weather events. Any truncated max values are reported in the plots.
+
+```{r weather_casualties_plot, fig.height=8, fig.width=11}
+hmelt <- melt(sdh, id = "evtype", measure.vars = 
+                      c("fatalities","injuries"))
+hmelt <- arrange(hmelt, variable, desc(value))
+hmelt$evtype <- factor(hmelt$evtype, levels = sdh$evtype[order(sdh$casualties[27:1])])
+
+ggplot(hmelt, aes(evtype,value, fill = variable)) + 
+      geom_bar(stat = "identity") +
+      coord_cartesian(ylim = c(0,2000)) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+      theme(axis.title = element_text(size = 18)) +
+      scale_fill_manual(values = c("orange", "darkred"),
+                        name = "Type of\nCasualty", 
+                        labels = c("Fatality", "Injury")) +
+      theme(legend.position = c(1,1), legend.justification = c(1,1)) +
+      ggtitle("Comparison of Fatalities and Injuries\nCaused By Weather Events (2006-2011)")+
+      labs(x = "Weather Event", y = "Number of Casualties") +
+      theme(plot.title = element_text(size=28, hjust=0)) +
+      annotate("rect", xmin = 6, xmax = 12, ymin = 1600, ymax = 2000,
+               fill = "white") +
+      annotate("text", x = 9, y = 1800, 
+               label = paste0("Undisplayed Total Causalties:\n",
+                              sdh[1, 1], ": ", sdh[1,4], "\n",
+                              sdh[2, 1], ": ", sdh[2,4]),
+               color = "grey20") +
+      theme(title = element_text(color = "grey20", face = "bold"),
+            text = element_text(color = "dimgrey", size = 12))
+      
+```
+
+###Summary
+As you can see, tornadoes are the leading cause of weather-related fatalities from 2006 to 2011, at `r sdh[which(sdh$evtype=="TORNADO"),2]` deaths. However, since the max values for total casualties of tornadoes and excessive heat have been truncated due to setting an upper y-limit of 2000, it is difficult to visualize just how much more a risk that tornadoes pose compared to other weather. For instance, over the 5-year period, tornadoes caused `r sdh[which(sdh$evtype=="TORNADO"),3]` injuries, whereas all other types of weather resulted in `r sum(sdh$injuries[2:nrow(sdh)])` injuries. The entire dataframe can be seen below.
+
+```{r}
+sdh
+```
+
+
+The following plots use a function called 'multiplot,' which is useful for putting multiple plots in a single figure in ggplot2. The code was obtained directly from the [Cookbook for R](http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/) website. 
+
+```{r multiplot, include=FALSE}
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+```{r property_crop_damage, fig.height=11, fig.width=8}
+
+sde <- arrange(sde, desc(propdmg))
+sde$evtype <- factor(sde$evtype, levels = sde$evtype[order(sde$propdmg[35:1])])
+p10 <- sde[1:10,]
+p <- ggplot(p10, aes(evtype,propdmg)) +
+      geom_bar(stat = "identity", fill = "orangered2", color = "yellow") +
+      coord_cartesian(ylim = c(0,16e9)) +
+      scale_y_continuous(breaks= seq(0,15e9,3e9),
+                         labels = as.character(seq(0,15,3))) +
+      theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+      theme(legend.position = "none") +
+      annotate("text", x = 1, y = 7.5e9, angle = 90, color = "grey90",
+               label = paste0("Max: $",floor(sde[1,2]/1e9), " Billion")) +
+      labs(x = "", y = "Property Damage\n(Billions of $)\n") +
+      ggtitle("Top 10 Causes of U.S. Weather-Related\nProperty and Crop Damage (2006-2011)") +
+      theme(plot.title = element_text(size=24, hjust=0),
+            axis.title = element_text(size = 14),
+            title = element_text(color = "grey20", face = "bold"))
+
+sde <- arrange(sde, desc(cropdmg))
+sde$evtype <- factor(sde$evtype, levels = sde$evtype[order(sde$cropdmg[35:1])])
+c10 <- sde[1:10,]
+c <- ggplot(c10, aes(evtype,cropdmg)) +
+      geom_bar(stat = "identity", fill = "green4", color = "green") +
+      coord_cartesian(ylim = c(0,4e9)) +
+      scale_y_continuous(breaks= seq(0,4e9,1e9),
+                         labels = as.character(seq(0,4,1))) +
+      theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+      theme(legend.position = "none") +
+      labs(x = "Weather Event", y = " Crop Damage\n(Billions of $)\n") +
+      theme(axis.title = element_text(size = 14),
+            title = element_text(color = "grey20", face = "bold"))
+
+multiplot(p,c, cols = 1)
+
+```
+
+###Summary 
+Floods cause by far the most damage to property and crops compared to other weather types. Over the period from 2006-2011, floods caused $`r sde[which(sde$evtype=="FLOOD/FLASH FLOOD"), "propdmg"]/1e9` billion in property damage and $`r sde[which(sde$evtype=="FLOOD/FLASH FLOOD"), "cropdmg"]/1e9` billion in crop damage. To put the property damage numbers in perspective, the total amount of damage cause by all other weather events over the same time period was $`r sum(sde$propdmg[2:nrow(sde)])/1e9` billion. In other words, floods caused `r sde[which(sde$evtype=="FLOOD/FLASH FLOOD"),"propdmg"]/sum(sde$propdmg[2:nrow(sde)])` times as much property damage over the 5 year period. 
+
+It is not much of a surprise that the leading cause of weather-related death and injury to humans is also a leading cause of property destruction. Tornadoes caused the 2nd most amount of property damage: $`r sde[which(sde$evtype=="TORNADO"), "propdmg"]/1e9` billion.
+
+Interestingly, droughts, which were relatively insignficant causes of death, injury, and property damage, was the 2nd leading cause of crop damage in 2006-2011. It caused $`r sde[which(sde$evtype=="DROUGHT"), "cropdmg"]/1e9` billion in losses in that time period.
+

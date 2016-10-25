@@ -1,0 +1,156 @@
+---
+title: "Regression Models - Quiz 3"
+author: "Fenton Taylor"
+date: "September 1, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits = 3)
+```
+
+```{r load_data, message=FALSE,warning=FALSE}
+data(mtcars)
+library(dplyr)
+```
+
+###Question 1
+
+Consider the mtcars data set. Fit a model with mpg as the outcome that includes number of cylinders as a factor variable and weight as confounder. Give the adjusted estimate for the expected change in mpg comparing 8 cylinders to 4.
+
+```{r question_1}
+mtcars <- mutate(mtcars, cyl=factor(cyl))
+fit1 <- lm(mpg ~ cyl + wt, mtcars)
+sf1 <- summary(fit1)$coef
+sf1
+```
+####Answer
+
+`r sf1[3]`
+
+Compared to 4-cyl cars with a mean of `r sf1[1]` mpg, 8-cyl cars have a mean mpg `r sf1[3]` less at `r sf1[1]+sf1[3]` mpg. 
+
+###Question 2
+
+Consider the mtcars data set. Fit a model with mpg as the outcome that includes number of cylinders as a factor variable and weight as a possible confounding variable. Compare the effect of 8 versus 4 cylinders on mpg for the adjusted and unadjusted by weight models. Here, adjusted means including the weight variable as a term in the regression model and unadjusted means the model without weight included. What can be said about the effect comparing 8 and 4 cylinders after looking at models with and without weight included?.
+
+```{r question_2}
+fit2 <- lm(mpg ~ cyl, mtcars)
+sf2 <- summary(fit2)$coef
+compare <- data.frame(with_wt=sf1[3],without_wt=sf2[3], row.names = "8-cyl Est.")
+compare
+```
+
+####Answer
+
+Therefore, holding weight constant, cylinder appears to have less of an impact on mpg than if weight is disregarded. 
+
+###Question 3
+
+Consider the mtcars data set. Fit a model with mpg as the outcome that considers number of cylinders as a factor variable and weight as confounder. Now fit a second model with mpg as the outcome model that considers the interaction between number of cylinders (as a factor variable) and weight. Give the P-value for the likelihood ratio test comparing the two models and suggest a model using 0.05 as a type I error rate significance benchmark.
+
+```{r question_3,message=FALSE}
+library(lmtest)
+fit3 <- lm(mpg ~ cyl*wt, mtcars)
+test <- lrtest(fit1,fit3)
+pval <- test$`Pr(>Chisq)`[2]
+test
+```
+
+####Answer
+
+The P-value `r pval` is larger than 0.05. So, according to our criterion, we would fail to reject, which suggests that the interaction terms may not be necessary.
+
+###Question 4
+
+Consider the mtcars data set. Fit a model with mpg as the outcome that includes number of cylinders as a factor variable and weight inlcuded in the model as lm(mpg ~ I(wt * 0.5) + factor(cyl), data = mtcars). How is the wt coefficient interpretted?
+
+```{r question_4}
+fit4 <- lm(mpg ~ I(wt * 0.5) + cyl, mtcars)
+summary(fit4)$coef
+compare <- data.frame(per_half_ton=sf1[4], per_ton=summary(fit4)$coef[2],
+                      row.names = "wt coef")
+compare
+```
+
+####Answer
+
+One unit of the weight variable equals 1000 lbs. Multiplying wt*0.5 doubles the coeffiecient, which corresponds to the estimated expected change in MPG per one ton increase in weight for a specific number of cylinders (4, 6, 8).
+
+###Question 5
+
+Consider the following data set:
+
+x <- c(0.586, 0.166, -0.042, -0.614, 11.72)  
+y <- c(0.549, -0.026, -0.127, -0.751, 1.344)
+
+Give the hat diagonal for the most influential point.
+
+```{r question_5}
+x <- c(0.586, 0.166, -0.042, -0.614, 11.72)
+y <- c(0.549, -0.026, -0.127, -0.751, 1.344)
+
+fit5 <- lm(y ~ x)
+hatvalues(fit5)
+max_hat <- hatvalues(fit5)[which.max(hatvalues(fit5))]
+max_hat
+# So, the 5th row contains the data for the most influential point.
+# Let's plot the data and take a look at the regression line with the extreme
+# data point (red line) and without it (blue line)
+
+plot(x, y, pch=19)
+abline(fit5, col="red")
+fit6 <- lm(y[-which.max(hatvalues(fit5))] ~ x[-which.max(hatvalues(fit5))])
+abline(fit6, col="blue")
+```
+
+####Answer
+
+The hat value for the most influential point is `r max_hat`.
+
+###Question 6
+
+Consider the following data set:
+
+x <- c(0.586, 0.166, -0.042, -0.614, 11.72)  
+y <- c(0.549, -0.026, -0.127, -0.751, 1.344)
+
+Give the slope dfbeta for the point with the highest hat value.
+
+```{r question_6}
+x <- c(0.586, 0.166, -0.042, -0.614, 11.72)  
+y <- c(0.549, -0.026, -0.127, -0.751, 1.344)
+
+fit5 <- lm(y ~ x)
+im <- influence.measures(fit5)$infmat
+im
+max_beta <- im[which.max(abs(im[,"hat"])),"dfb.x"]
+```
+
+####Answer
+```{r}
+max_beta
+```
+
+###Question 7
+
+Consider a regression relationship between Y and X with and without adjustment for a third variable Z. Which of the following is true about comparing the regression coefficient between Y and X with and without adjustment for Z.
+
+```{r question_7}
+x <- c(0.586, 0.166, -0.042, -0.614, 11.72)  
+y <- c(0.549, -0.026, -0.127, -0.751, 1.344)
+set.seed(4567)
+z <- rnorm(5)
+
+fit <- lm(y ~ x)
+fitz <- lm(y ~ x + z)
+
+summary(fit)$coef
+summary(fitz)$coef
+```
+
+####Answer
+It is possible for the coefficient to reverse sign after adjustment. For example, it can be strongly significant and positive before adjustment and strongly significant and negative after adjustment.
+
+In this example, the sign changes from positive to negative. However, neither of the correlations are strongly signifcant, but it is certainly possible.
