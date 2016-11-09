@@ -1,0 +1,17 @@
+base
+ElemStatLearn
+lattice
+ggplot2
+caret
+randomForest
+survival
+gbm
+plyr
+AppliedPredictiveModeling
+MASS
+lubridate
+zoo
+timeDate
+forecast
+lars
+elasticnet
